@@ -1,6 +1,6 @@
 ﻿namespace SiteCheck
 {
-    public class ConsoleEx
+    public static class ConsoleEx
     {
         /// <summary>
         /// Lock object.
@@ -23,7 +23,7 @@
 
             while (true)
             {
-                list.Add($"{ex.Message}{Environment.NewLine}");
+                list.Add(ex.Message + Environment.NewLine);
 
                 if (ex.InnerException == null)
                 {
