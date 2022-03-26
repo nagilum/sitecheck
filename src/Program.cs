@@ -1,10 +1,14 @@
 ﻿using HtmlAgilityPack;
 using Microsoft.AspNetCore.WebUtilities;
+using System.Globalization;
+using System.Reflection;
 using System.Text;
+
+[assembly: AssemblyVersion("1.0.*")]
 
 namespace SiteCheck
 {
-    public class Program
+    public static class Program
     {
         /// <summary>
         /// Base URI.
@@ -20,9 +24,19 @@ namespace SiteCheck
         };
 
         /// <summary>
+        /// Directory to write the report to.
+        /// </summary>
+        private static string ReportPath { get; set; } = Directory.GetCurrentDirectory();
+
+        /// <summary>
         /// All queued items.
         /// </summary>
         private static List<QueueEntry> QueueEntries { get; } = new();
+
+        /// <summary>
+        /// Headers to verify pr. request.
+        /// </summary>
+        private static Dictionary<string, string?> VerifyHeaders { get; } = new();
 
         /// <summary>
         /// Init all the things..
@@ -33,13 +47,8 @@ namespace SiteCheck
             // Do we have an argument?
             if (args.Length == 0)
             {
-                ConsoleEx.WriteObjects(
-                    ConsoleColor.Red,
-                    "Error: ",
-                    (byte) 0x00,
-                    "Requires first argument to be URL to start scanning from.",
-                    Environment.NewLine);
-
+                // Show the apps usage info and parameters.
+                ShowAppUsageInfo();
                 return;
             }
 
@@ -51,13 +60,37 @@ namespace SiteCheck
             }
             catch (Exception ex)
             {
+                // Show error.
                 ConsoleEx.WriteException(ex);
+                Console.WriteLine();
+
+                // Show the apps usage info and parameters.
+                ShowAppUsageInfo();
+
+                return;
+            }
+
+            // Analyze the remaining command-line arguments.
+            try
+            {
+                AnalyzeCommandLineArguments(args.Skip(1).ToArray());
+            }
+            catch (Exception ex)
+            {
+                // Show error.
+                ConsoleEx.WriteException(ex);
+                Console.WriteLine();
+
+                // Show the apps usage info and parameters.
+                ShowAppUsageInfo();
+
                 return;
             }
 
             // Let's kick it off.
             ConsoleEx.WriteObjects(
-                "SiteCheck v0.1",
+                "SiteCheck v",
+                GetVersion(),
                 Environment.NewLine);
 
             ConsoleEx.WriteObjects(
@@ -129,7 +162,7 @@ namespace SiteCheck
 
             var average = QueueEntries
                 .Where(n => n.RequestLength.HasValue)
-                .Sum(n => n.RequestLength.Value.TotalMilliseconds) /
+                .Sum(n => n.RequestLength?.TotalMilliseconds ?? 0) /
                 QueueEntries.Count;
 
             ConsoleEx.WriteObjects(
@@ -141,86 +174,116 @@ namespace SiteCheck
         }
 
         /// <summary>
-        /// Process the indexed queue entry.
+        /// Analyze the command-line arguments.
         /// </summary>
-        /// <param name="index">Index in queue.</param>
-        private static async Task ProcessQueueEntry(int index)
+        /// <param name="args">Command-line arguments.</param>
+        private static void AnalyzeCommandLineArguments(string[] args)
         {
-            var entry = QueueEntries[index];
-
-            try
+            if (args.Length < 2)
             {
-                // Mark the request as started.
-                entry.RequestCreated = DateTimeOffset.Now;
-
-                // Make request.
-                using var response = await DownloadClient.GetAsync(entry.Uri);
-                var ms = new MemoryStream();
-                await response.Content.CopyToAsync(ms);
-
-                // Keep the status code.
-                entry.StatusCode = response.StatusCode;
-                entry.StatusDescription = ReasonPhrases.GetReasonPhrase((int) response.StatusCode);
-
-                // Mark the request as finished.
-                entry.RequestFinished = DateTimeOffset.Now;
-
-                // Analyze HTML and extract new links to scan.
-                ExtractLinksFromHtml(entry.Uri, ms.ToArray());
-            }
-            catch (Exception ex)
-            {
-                ConsoleEx.WriteException(ex);
                 return;
             }
 
-            // Status code.
-            var statusCode = ((int) entry.StatusCode).ToString();
-
-            ConsoleColor statusCodeColor;
-
-            if (statusCode.StartsWith("3"))
+            for (var i = 0; i < args.Length - 1; i++)
             {
-                statusCodeColor = ConsoleColor.Yellow;
-            }
-            else if (statusCode.StartsWith("2"))
-            {
-                statusCodeColor = ConsoleColor.Green;
-            }
-            else
-            {
-                statusCodeColor = ConsoleColor.Red;
-            }
+                switch (args[i])
+                {
+                    // -t <milliseconds>    Set the timeout of the HTTP requests.
+                    case "-t":
+                        if (!double.TryParse(
+                                args[i + 1],
+                                NumberStyles.Any,
+                                new CultureInfo("en-US"),
+                                out var milliSeconds))
+                        {
+                            throw new Exception($"Unable to parse {args[i + 1]} to milliseconds.");
+                        }
 
-            // Response time.
-            var responseTime = entry.RequestLength.HasValue
-                ? $"{(int) entry.RequestLength.Value.TotalMilliseconds}ms"
-                : string.Empty;
+                        DownloadClient.Timeout = TimeSpan.FromMilliseconds(milliSeconds);
+                        break;
 
-            // Write to console.
-            ConsoleEx.WriteObjects(
-                ConsoleColor.Blue,
-                " * ",
-                (byte) 0x00,
-                "[",
-                ConsoleColor.Blue,
-                index + 1,
-                (byte) 0x00,
-                "/",
-                ConsoleColor.Blue,
-                QueueEntries.Count,
-                (byte) 0x00,
-                "] [",
-                statusCodeColor,
-                statusCode,
-                (byte) 0x00,
-                "] ",
-                ConsoleColor.Blue,
-                responseTime,
-                (byte) 0x00,
-                " ",
-                entry.Uri,
-                Environment.NewLine);
+                    // -h <header>          Verify the existence of a header.
+                    // -h <header>:<value>  Verify the header and its value. Value can be a regex.
+                    case "-h":
+                        var value = args[i + 1];
+                        var sp = value.IndexOf(':');
+
+                        var key = sp == -1
+                            ? value.ToLower()
+                            : value.Substring(0, sp).ToLower();
+
+                        value = sp == -1
+                            ? null
+                            : value.Substring(sp + 1);
+
+                        VerifyHeaders[key] = value;
+                        break;
+
+                    // -p <path>            Give path where to write the report.
+                    case "-p":
+                        if (!Directory.Exists(args[i + 1]))
+                        {
+                            throw new Exception($"Specified path does not exist: {args[i + 1]}");
+                        }
+
+                        ReportPath = args[i + 1];
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Analyze headers against the user input.
+        /// </summary>
+        /// <param name="entry">Current queue entry.</param>
+        private static void AnalyzeHeaders(QueueEntry entry)
+        {
+            foreach (var item in VerifyHeaders)
+            {
+                // Verify existence.
+                if (item.Value == null)
+                {
+                    if (entry.Headers.ContainsKey(item.Key))
+                    {
+                        entry.HeadersVerified.Add(item.Key, item.Value);
+                    }
+                    else
+                    {
+                        entry.HeadersNotVerified.Add(item.Key, item.Value);
+                    }
+                }
+
+                // Verify header and value.
+                else
+                {
+                    if (entry.Headers.ContainsKey(item.Key))
+                    {
+                        var value = entry.Headers[item.Key];
+
+                        if (value != null)
+                        {
+                            var regex = new System.Text.RegularExpressions.Regex(item.Value);
+
+                            if (regex.Matches(value).Count > 0)
+                            {
+                                entry.HeadersVerified.Add(item.Key, item.Value);
+                            }
+                            else
+                            {
+                                entry.HeadersNotVerified.Add(item.Key, item.Value);
+                            }
+                        }
+                        else
+                        {
+                            entry.HeadersNotVerified.Add(item.Key, item.Value);
+                        }
+                    }
+                    else
+                    {
+                        entry.HeadersNotVerified.Add(item.Key, item.Value);
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -275,6 +338,144 @@ namespace SiteCheck
         }
 
         /// <summary>
+        /// Get application version.
+        /// </summary>
+        /// <returns>Application version.</returns>
+        private static string GetVersion()
+        {
+            return Assembly.GetExecutingAssembly()?.GetName()?.Version?.ToString()
+                ?? string.Empty;
+        }
+
+        /// <summary>
+        /// Process the indexed queue entry.
+        /// </summary>
+        /// <param name="index">Index in queue.</param>
+        private static async Task ProcessQueueEntry(int index)
+        {
+            var entry = QueueEntries[index];
+
+            try
+            {
+                // Mark the request as started.
+                entry.RequestCreated = DateTimeOffset.Now;
+
+                // Make request.
+                using var response = await DownloadClient.GetAsync(entry.Uri);
+                var ms = new MemoryStream();
+                await response.Content.CopyToAsync(ms);
+
+                // Mark the request as finished.
+                entry.RequestFinished = DateTimeOffset.Now;
+
+                // Keep the status code.
+                entry.StatusCode = response.StatusCode;
+                entry.StatusDescription = ReasonPhrases.GetReasonPhrase((int) response.StatusCode);
+
+                // Headers.
+                entry.Headers = response.Headers
+                    .ToDictionary(n => n.Key.ToLower(),
+                                  n => string.Join(" ", n.Value));
+
+                foreach (var item in response.Content.Headers)
+                {
+                    entry.Headers[item.Key.ToLower()] = string.Join(" ", item.Value);
+                }
+
+                // Analyze headers?
+                if (VerifyHeaders.Count > 0)
+                {
+                    AnalyzeHeaders(entry);
+                }
+
+                // Analyze HTML and extract new links to scan.
+                ExtractLinksFromHtml(entry.Uri, ms.ToArray());
+            }
+            catch (Exception ex)
+            {
+                entry.FailureReasons.Add(ex.Message);
+            }
+
+            // Status code.
+            var statusCode = entry.StatusCode.HasValue
+                ? ((int) entry.StatusCode).ToString()
+                : "---";
+
+            ConsoleColor statusCodeColor;
+
+            if (statusCode.StartsWith("3"))
+            {
+                statusCodeColor = ConsoleColor.Yellow;
+            }
+            else if (statusCode.StartsWith("2"))
+            {
+                statusCodeColor = ConsoleColor.Green;
+            }
+            else
+            {
+                statusCodeColor = ConsoleColor.Red;
+            }
+
+            // Response time.
+            var responseTime = entry.RequestLength.HasValue
+                ? $"{(int) entry.RequestLength.Value.TotalMilliseconds}ms"
+                : string.Empty;
+
+            // Write to console.
+            ConsoleEx.WriteObjects(
+                ConsoleColor.Blue,
+                " * ",
+                (byte) 0x00,
+                "[",
+                ConsoleColor.Blue,
+                index + 1,
+                (byte) 0x00,
+                "/",
+                ConsoleColor.Blue,
+                QueueEntries.Count,
+                (byte) 0x00,
+                "] [",
+                statusCodeColor,
+                statusCode,
+                (byte) 0x00,
+                "] ",
+                ConsoleColor.Blue,
+                responseTime,
+                (byte) 0x00,
+                " ",
+                entry.Uri,
+                Environment.NewLine);
+        }
+
+        /// <summary>
+        /// Show the apps usage info and parameters.
+        /// </summary>
+        private static void ShowAppUsageInfo()
+        {
+            ConsoleEx.WriteObjects(
+                "SiteCheck v",
+                GetVersion(),
+                Environment.NewLine,
+                Environment.NewLine);
+
+            ConsoleEx.WriteObjects(
+                "Usage: sitecheck <url> [options]",
+                Environment.NewLine,
+                Environment.NewLine);
+
+            ConsoleEx.WriteObjects(
+                "  -t <milliseconds>    Set the timeout of the HTTP requests. Defaults to 10 seconds.",
+                Environment.NewLine,
+                "  -h <header>          Verify the existence of a header.",
+                Environment.NewLine,
+                "  -h <header>:<value>  Verify the header and its value. Value can be a regex.",
+                Environment.NewLine,
+                "  -p <path>            Give path where to write the report. Defaults to working directory.",
+                Environment.NewLine,
+                Environment.NewLine);
+        }
+
+        /// <summary>
         /// Generate a report based on the queue and other metadata.
         /// </summary>
         private static async Task WriteReport(
@@ -284,104 +485,11 @@ namespace SiteCheck
         {
             var html = new StringBuilder();
 
-            html.Append("<!doctype html>");
-            html.Append("<html lang=\"en\">");
-            html.Append("<head>");
-
-            // Head.
-            html.Append("<meta charset=\"utf-8\">");
-            html.Append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-            html.Append($"<title>SiteCheck: {BaseUri}</title>");
-
-            html.Append("</head>");
-            html.Append("<body>");
-
-            // Body.
-            html.Append($"<h1>SiteCheck: {BaseUri}</h1>");
-
-            // Stats.
-            var average = QueueEntries
-                .Where(n => n.RequestLength.HasValue)
-                .Sum(n => n.RequestLength.Value.TotalMilliseconds) /
-                QueueEntries.Count;
-
-            html.Append("<h2>Stats</h2>");
-            html.Append("<ul>");
-            html.Append($"<li>Run started: <strong>{start}</strong></li>");
-            html.Append($"<li>Run ended: <strong>{end}</strong></li>");
-            html.Append($"<li>Run took: <strong>{duration}</strong></li>");
-            html.Append($"<li>Total URLs scanned: <strong>{QueueEntries.Count}</strong></li>");
-            html.Append($"<li>Average response time: <strong>{(int) average}ms</strong></li>");
-            html.Append("</ul>");
-
-            // Response codes.
-            var codes = QueueEntries
-                .Where(n => n.StatusCode.HasValue)
-                .Select(n => (int) n.StatusCode.Value)
-                .Distinct()
-                .OrderBy(n => n)
-                .ToList();
-
-            html.Append("<h2>HTTP Response Codes Hits</h2>");
-            html.Append("<ul>");
-            
-            foreach (var code in codes)
-            {
-                var count = QueueEntries
-                    .Count(n => n.StatusCode.HasValue &&
-                                (int)n.StatusCode.Value == code);
-
-                html.Append($"<li>{code}: {count}</li>");
-            }
-
-            html.Append("</ul>");
-
-            // List of URLs.
-            html.Append("<table border=1>");
-            html.Append("<thead><tr>");
-
-            html.Append("<th>URL</th>");
-            html.Append("<th>Request Started</th>");
-            html.Append("<th>Request Finished</th>");
-            html.Append("<th>Response Time</th>");
-            html.Append("<th>HTTP Status</th>");
-
-            html.Append("</tr></thead>");
-            html.Append("<tbody>");
-
-            foreach (var entry in QueueEntries)
-            {
-                html.Append("<tr>");
-
-                // URL.
-                html.Append($"<td>{entry.Uri}</td>");
-
-                // Request Started.
-                html.Append($"<td>{entry.RequestCreated}</td>");
-
-                // Request Finished.
-                html.Append($"<td>{entry.RequestFinished}</td>");
-
-                // Response Time.
-                html.Append($"<td>{entry.RequestLength}</td>");
-
-                // HTTP Status Code.
-                html.Append($"<td>{(int) entry.StatusCode} {entry.StatusDescription}</td>");
-
-                // Done.
-                html.Append("</tr>");
-            }
-
-            html.Append("</tbody>");
-            html.Append("</table>");
-            html.Append("</body>");
-            html.Append("</html>");
-
             // Write to file.
             try
             {
                 var path = Path.Combine(
-                    Directory.GetCurrentDirectory(),
+                    ReportPath,
                     $"report-{DateTimeOffset.Now:yyyy-MM-dd-HH-mm-ss}-{BaseUri?.Host}.html");
 
                 await File.WriteAllTextAsync(
