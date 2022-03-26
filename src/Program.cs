@@ -350,6 +350,152 @@ namespace SiteCheck
         }
 
         /// <summary>
+        /// Generate the HTML content for the report.
+        /// </summary>
+        /// <param name="start">When the scan started.</param>
+        /// <param name="end">When the scan ended.</param>
+        /// <param name="duration">How long the scan took.</param>
+        /// <returns>Generated HTML.</returns>
+        private static async Task<string> GenerateHtmlReport(
+            DateTimeOffset start,
+            DateTimeOffset end,
+            TimeSpan duration)
+        {
+            // Get templates.
+            var html = await File.ReadAllTextAsync(
+                    Path.Combine(
+                        Directory.GetCurrentDirectory(),
+                        "TemplateReport.html"));
+
+            var templateRequest = await File.ReadAllTextAsync(
+                Path.Combine(
+                    Directory.GetCurrentDirectory(),
+                    "TemplateRequest.html"));
+
+            // BaseUri.
+            html = html.Replace(
+                "{{BaseUri}}",
+                BaseUri?.ToString());
+
+            // AppVersion.
+            html = html.Replace(
+                "{{AppVersion}}",
+                GetVersion());
+
+            // Metadata.
+            html = html
+                .Replace(
+                    "{{ScanStarted}}",
+                    start.ToString("yyyy-MM-dd HH:mm:ss"))
+                .Replace(
+                    "{{ScanEnded}}",
+                    end.ToString("yyyy-MM-dd HH:mm:ss"))
+                .Replace(
+                    "{{ScanDuration}}",
+                    duration.ToString());
+
+            // Requests.
+            var requests = new List<string>();
+
+            foreach (var entry in QueueEntries)
+            {
+                // Clone the template.
+                var request = templateRequest;
+
+                // Uri.
+                request = request
+                    .Replace(
+                        "{{Uri}}",
+                        entry.Uri.ToString());
+
+                // ReuqestTime.
+                var rl = entry.RequestLength ??
+                         new TimeSpan(0);
+
+                var rtf =
+                    (rl.Hours > 0 ? rl.Hours + "h " : string.Empty) +
+                    (rl.Minutes > 0 ? rl.Minutes + "m " : string.Empty) +
+                    (rl.Seconds > 0 ? rl.Seconds + "s " : string.Empty) +
+                    (rl.Milliseconds > 0 ? rl.Milliseconds + "ms" : string.Empty);
+
+                request = request
+                    .Replace(
+                        "{{ReuqestTimeToolTip}}",
+                        rl.ToString())
+                    .Replace(
+                        "{{ReuqestTimeFormatted}}",
+                        rtf.Trim());
+
+                // StatusCode.
+                var statusCode = entry.StatusCode.HasValue
+                    ? ((int) entry.StatusCode.Value).ToString()
+                    : "-";
+
+                var statusCodeCssClass = "red";
+
+                if (statusCode.StartsWith("2"))
+                {
+                    statusCodeCssClass = "green";
+                }
+                else if (statusCode.StartsWith("3"))
+                {
+                    statusCodeCssClass = "yellow";
+                }
+
+                request = request
+                    .Replace(
+                        "{{StatusCode}}",
+                        statusCode)
+                    .Replace(
+                        "{{StatusDescription}}",
+                        entry.StatusDescription)
+                    .Replace(
+                        "{{StatusCodeCssClass}}",
+                        statusCodeCssClass);
+
+                // ChecksStatus.
+                if (entry.FailureReasons.Count > 0)
+                {
+                    request = request
+                        .Replace(
+                            "{{ChecksStatusToolTip}}",
+                            "Request Failed Some or All Checks")
+                        .Replace(
+                            "{{ChecksStatusCssClass}}",
+                            "red")
+                        .Replace(
+                            "{{ChecksStatusShorthand}}",
+                            "Failed");
+                }
+                else
+                {
+                    request = request
+                        .Replace(
+                            "{{ChecksStatusToolTip}}",
+                            "Request Passed Checks")
+                        .Replace(
+                            "{{ChecksStatusCssClass}}",
+                            "green")
+                        .Replace(
+                            "{{ChecksStatusShorthand}}",
+                            "Passed");
+                }
+
+                // Tools.
+
+                // Done.
+                requests.Add(request);
+            }
+
+            html = html.Replace(
+                "{{Requests}}",
+                string.Join("\r\n", requests));
+
+            // Done.
+            return html;
+        }
+
+        /// <summary>
         /// Get application version.
         /// </summary>
         /// <returns>Application version.</returns>
@@ -490,25 +636,32 @@ namespace SiteCheck
         /// <summary>
         /// Generate a report based on the queue and other metadata.
         /// </summary>
+        /// <param name="start">When the scan started.</param>
+        /// <param name="end">When the scan ended.</param>
+        /// <param name="duration">How long the scan took.</param>
         private static async Task WriteReport(
             DateTimeOffset start,
             DateTimeOffset end,
             TimeSpan duration)
         {
-            var html = new StringBuilder();
-
-            // Write HTML and JSON reports to disk.
             try
             {
                 var dt = DateTime.Now;
 
+                // Compile HTML.
+                var html = await GenerateHtmlReport(
+                    start,
+                    end,
+                    duration);
+
+                // Write to disk.
                 var path = Path.Combine(
                     ReportPath,
                     $"report-{dt:yyyy-MM-dd-HH-mm-ss}-{BaseUri?.Host}.html");
 
                 await File.WriteAllTextAsync(
                     path,
-                    html.ToString());
+                    html);
 
                 path = Path.Combine(
                     ReportPath,

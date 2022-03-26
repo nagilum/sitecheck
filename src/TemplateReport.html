@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>SiteCheck - {{BaseUri}}</title>
+
+        <style>
+            body {
+                background-color: #22272e;
+                color: #eee;
+                font-family: sans-serif;
+                font-size: 12px;
+                margin: 0;
+                padding: 20px;
+            }
+
+            h1 {
+                font-family: serif;
+                font-size: 30px;
+                margin: 0 0 20px 0;
+                padding: 0;
+            }
+
+            h1 small {
+                font-weight: normal;
+            }
+
+            span {
+                display: inline-block;
+            }
+
+            span.green {
+                background-color: #347d39;
+                border-radius: 4px;
+                margin: -5px 0;
+                padding: 5px 8px;
+            }
+
+            table {
+                background-color: #2d333b;
+                border: solid 1px #444c56;
+                border-radius: 5px;
+                margin: 0;
+                padding: 0;
+            }
+
+            table.width-full {
+                width: 100%;
+            }
+
+            table thead {
+            }
+
+            table thead tr {
+            }
+
+            table thead tr th {
+                border-bottom: solid 1px #444c56;
+                padding: 10px;
+                text-align: left;
+            }
+
+            table thead tr th.width-150 {
+                width: 150px;
+            }
+
+            table tbody {
+            }
+
+            table tbody tr {
+                transition: .25s;
+            }
+
+            table tbody tr:hover {
+                background-color: #373e47;
+            }
+
+            table tbody tr td {
+                padding: 10px;
+            }
+
+            table tbody tr td a {
+                color: #ccc;
+                cursor: pointer;
+                text-decoration: none;
+                transition: .25s;
+            }
+
+            table tbody tr td a:hover {
+                color: #fff;
+                text-decoration: underline;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>
+            SiteCheck
+            <small>
+                v{{AppVersion}}
+            </small>
+        </h1>
+
+        <table>
+            <tbody>
+                <tr>
+                    <td>
+                        Base URL
+                    </td>
+                    <td>
+                        <a href="{{BaseUri}}">
+                            {{BaseUri}}
+                        </a>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        Scan Started
+                    </td>
+                    <td>
+                        {{ScanStarted}}
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        Scan Ended
+                    </td>
+                    <td>
+                        {{ScanEnded}}
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        Scan Took
+                    </td>
+                    <td>
+                        {{ScanDuration}}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <br><br>
+
+        <table class="width-full">
+            <thead>
+                <tr>
+                    <th>
+                        URL
+                    </th>
+                    <th class="width-150">
+                        Request Time
+                    </th>
+                    <th class="width-150">
+                        Status Code
+                    </th>
+                    <th class="width-150">
+                        Checks
+                    </th>
+                    <th class="width-150">
+                        &nbsp;
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                {{Requests}}
+            </tbody>
+        </table>
+
+        <script>
+        </script>
+    </body>
+</html>
