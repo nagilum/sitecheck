@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.WebUtilities;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 
 [assembly: AssemblyVersion("1.0.*")]
 
@@ -485,21 +486,51 @@ namespace SiteCheck
         {
             var html = new StringBuilder();
 
-            // Write to file.
+            // Write HTML and JSON reports to disk.
             try
             {
+                var dt = DateTime.Now;
+
                 var path = Path.Combine(
                     ReportPath,
-                    $"report-{DateTimeOffset.Now:yyyy-MM-dd-HH-mm-ss}-{BaseUri?.Host}.html");
+                    $"report-{dt:yyyy-MM-dd-HH-mm-ss}-{BaseUri?.Host}.html");
 
                 await File.WriteAllTextAsync(
                     path,
                     html.ToString());
 
-                ConsoleEx.WriteObjects(
-                    "Wrote report to ",
-                    ConsoleColor.Black,
+                path = Path.Combine(
+                    ReportPath,
+                    $"report-{dt:yyyy-MM-dd-HH-mm-ss}-{BaseUri?.Host}.json");
+
+                await File.WriteAllTextAsync(
                     path,
+                    JsonSerializer.Serialize(
+                        new
+                        {
+                            meta = new
+                            {
+                                start,
+                                end,
+                                duration
+                            },
+                            config = new
+                            {
+                                BaseUri,
+                                VerifyHeaders
+                            },
+                            uris = QueueEntries
+                        },
+                        new JsonSerializerOptions
+                        {
+                            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                            WriteIndented = true
+                        }));
+
+                ConsoleEx.WriteObjects(
+                    "Wrote reports to ",
+                    ConsoleColor.Black,
+                    ReportPath,
                     (byte) 0x00,
                     Environment.NewLine);
             }
