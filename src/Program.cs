@@ -12,6 +12,11 @@ namespace SiteCheck
     public static class Program
     {
         /// <summary>
+        /// All queued items.
+        /// </summary>
+        public static List<QueueEntry> QueueEntries { get; } = new();
+
+        /// <summary>
         /// Base URI.
         /// </summary>
         private static Uri? BaseUri { get; set; }
@@ -28,11 +33,6 @@ namespace SiteCheck
         /// Directory to write the report to.
         /// </summary>
         private static string ReportPath { get; set; } = Directory.GetCurrentDirectory();
-
-        /// <summary>
-        /// All queued items.
-        /// </summary>
-        private static List<QueueEntry> QueueEntries { get; } = new();
 
         /// <summary>
         /// Headers to verify pr. request.
@@ -290,9 +290,9 @@ namespace SiteCheck
         /// <summary>
         /// Analyze HTML and extract new links to scan.
         /// </summary>
-        /// <param name="baseUri">Content source.</param>
+        /// <param name="entry">Current queue entry.</param>
         /// <param name="bytes">Content to analyze.</param>
-        private static void ExtractLinksFromHtml(Uri baseUri, byte[] bytes)
+        private static void ExtractLinksFromHtml(QueueEntry entry, byte[] bytes)
         {
             var doc = new HtmlDocument();
             HtmlNodeCollection nodes;
@@ -322,12 +322,23 @@ namespace SiteCheck
                 {
                     if (BaseUri != null)
                     {
-                        var uri = new Uri(baseUri, href);
+                        var uri = new Uri(entry.Uri, href);
 
-                        if (BaseUri.IsBaseOf(uri) &&
-                            !QueueEntries.Any(n => n.Uri == uri))
+                        if (BaseUri.IsBaseOf(uri))
                         {
-                            QueueEntries.Add(new QueueEntry(uri));
+                            var temp = QueueEntries
+                                .Find(n => n.Uri == uri);
+
+                            if (temp != null)
+                            {
+                                entry.LinksTo.Add(temp.Id);
+                            }
+                            else
+                            {
+                                temp = new QueueEntry(uri);
+                                entry.LinksTo.Add(temp.Id);
+                                QueueEntries.Add(temp);
+                            }
                         }
                     }
                 }
@@ -390,7 +401,7 @@ namespace SiteCheck
                 }
 
                 // Analyze HTML and extract new links to scan.
-                ExtractLinksFromHtml(entry.Uri, ms.ToArray());
+                ExtractLinksFromHtml(entry, ms.ToArray());
             }
             catch (Exception ex)
             {

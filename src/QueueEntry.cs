@@ -5,6 +5,11 @@ namespace SiteCheck
     public class QueueEntry
     {
         /// <summary>
+        /// Unique ID.
+        /// </summary>
+        public int Id { get; set; }
+
+        /// <summary>
         /// URL to scan.
         /// </summary>
         public Uri Uri { get; set; }
@@ -68,11 +73,17 @@ namespace SiteCheck
         public List<string> FailureReasons { get; set; } = new();
 
         /// <summary>
+        /// ID of entries this entry is linking to.
+        /// </summary>
+        public List<int> LinksTo { get; set; } = new();
+
+        /// <summary>
         /// Create new queue entry.
         /// </summary>
         /// <param name="uri">URL to scan.</param>
         public QueueEntry(Uri uri)
         {
+            this.Id = Program.QueueEntries.Count + 1;
             this.Uri = uri;
         }
     }
